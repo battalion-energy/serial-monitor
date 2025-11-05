@@ -4,9 +4,8 @@ use anyhow::{Context, Result};
 use args::Args;
 use clap::Parser;
 use tokio::io::AsyncReadExt;
-use tokio_serial::SerialPortBuilderExt;
-use tracing::{error, info, instrument};
-use crate::args::SerialConfig;
+use tokio_serial::{SerialPortBuilderExt, SerialStream};
+use tracing::Instrument;
 
 struct HexBytes<'a>(&'a [u8]);
 
@@ -22,27 +21,13 @@ impl<'a> std::fmt::Display for HexBytes<'a> {
     }
 }
 
-
-
-#[instrument(skip(config))]
-async fn monitor_port(port_name: String, config: SerialConfig) -> Result<()> {
-    info!("Opening port...");
-
-    let mut port = tokio_serial::new(&port_name, config.baud_rate)
-        .data_bits(config.data_bits)
-        .parity(config.parity)
-        .stop_bits(config.stop_bits)
-        .open_native_async()
-        .with_context(|| format!("Failed to open port {}", port_name))?;
-
-    info!("Monitoring ({})", config);
-
+async fn monitor_port(mut port: SerialStream) -> Result<()> {
     let mut buffer = [0u8; 1024];
     loop {
         match port.read(&mut buffer).await {
             Ok(n) if n > 0 => {
                 let data = &buffer[..n];
-                info!("{}", HexBytes(data));
+                tracing::info!("{}", HexBytes(data));
             }
             Ok(_) => {
                 // No data read, continue
@@ -51,7 +36,7 @@ async fn monitor_port(port_name: String, config: SerialConfig) -> Result<()> {
                 // Timeout, continue
             }
             Err(e) => {
-                error!("Error reading: {}", e);
+                tracing::error!("Error reading: {}", e);
                 return Err(e.into());
             }
         }
@@ -69,25 +54,31 @@ async fn main() -> Result<()> {
 
     let config = args.serial();
 
+    // Open all ports sequentially
+    let mut unspawned_tasks = Vec::new();
 
-    info!(
-        "Starting serial monitor for {} port(s)...",
-        args.ports.len()
-    );
+    for port_name in &args.ports {
+        let _span = tracing::info_span!("opening", port = ?port_name).entered();
+        let port = tokio_serial::new(port_name, config.baud_rate)
+            .data_bits(config.data_bits)
+            .parity(config.parity)
+            .stop_bits(config.stop_bits)
+            .open_native_async()
+            .context("opening port")?;
 
-    // Spawn a task for each serial port
-    let mut tasks = Vec::new();
-    for port in args.ports {
-        let task = tokio::spawn(monitor_port(port.clone(), config));
-        tasks.push(task);
+        tracing::info!("opened port");
+        let task =
+            async { monitor_port(port).await }.instrument(tracing::info_span!("monitor", port=?port_name));
+        unspawned_tasks.push(task);
     }
 
-    // Wait for all tasks (they run indefinitely unless there's an error)
-    for task in tasks {
-        if let Err(e) = task.await? {
-            error!("Task error: {}", e);
-        }
+    for task in unspawned_tasks {
+        tokio::spawn(task);
     }
+
+    tracing::info!("press ctrl-c to exit");
+    tokio::signal::ctrl_c().await?;
+    tracing::info!("shutting down...");
 
     Ok(())
 }
