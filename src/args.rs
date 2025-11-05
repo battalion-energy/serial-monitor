@@ -26,7 +26,18 @@ pub struct Args {
     pub stop_bits: StopBitsArg,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum)]
+impl Args {
+    pub(crate) fn serial(&self) -> SerialConfig {
+        SerialConfig {
+            baud_rate: self.baud_rate,
+            data_bits: self.data_bits.into(),
+            parity: self.parity.into(),
+            stop_bits: self.stop_bits.into(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, clap::ValueEnum)]
 pub enum ParityArg {
     None,
     Odd,
@@ -80,5 +91,38 @@ impl From<StopBitsArg> for StopBits {
             StopBitsArg::One => StopBits::One,
             StopBitsArg::Two => StopBits::Two,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SerialConfig {
+    pub(crate) baud_rate: u32,
+    pub(crate) data_bits: DataBits,
+    pub(crate) parity: Parity,
+    pub(crate) stop_bits: StopBits,
+}
+
+impl std::fmt::Display for SerialConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}bps {}/{}/{}",
+            self.baud_rate,
+            match self.data_bits {
+                DataBits::Five => "5",
+                DataBits::Six => "6",
+                DataBits::Seven => "7",
+                DataBits::Eight => "8",
+            },
+            match self.parity {
+                Parity::None => "N",
+                Parity::Odd => "O",
+                Parity::Even => "E",
+            },
+            match self.stop_bits {
+                StopBits::One => "1",
+                StopBits::Two => "2",
+            }
+        )
     }
 }
