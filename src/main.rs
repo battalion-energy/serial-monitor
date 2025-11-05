@@ -2,6 +2,21 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tokio::io::AsyncReadExt;
 use tokio_serial::{DataBits, Parity, SerialPortBuilderExt, StopBits};
+use tracing::{error, info, instrument};
+
+struct HexBytes<'a>(&'a [u8]);
+
+impl<'a> std::fmt::Display for HexBytes<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, byte) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ")?;
+            }
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "serial-monitor")]
@@ -45,6 +60,7 @@ impl From<ParityArg> for Parity {
     }
 }
 
+#[instrument(skip(data_bits, parity, stop_bits))]
 async fn monitor_port(
     port_name: String,
     baud_rate: u32,
@@ -52,7 +68,7 @@ async fn monitor_port(
     parity: Parity,
     stop_bits: StopBits,
 ) -> Result<()> {
-    println!("[{}] Opening port...", port_name);
+    info!("Opening port...");
 
     let mut port = tokio_serial::new(&port_name, baud_rate)
         .data_bits(data_bits)
@@ -61,9 +77,8 @@ async fn monitor_port(
         .open_native_async()
         .with_context(|| format!("Failed to open port {}", port_name))?;
 
-    println!(
-        "[{}] Monitoring ({}bps {}{}{})",
-        port_name,
+    let config_str = format!(
+        "{}bps {}{}{}",
         baud_rate,
         match data_bits {
             DataBits::Five => "5",
@@ -81,27 +96,14 @@ async fn monitor_port(
             StopBits::Two => "2",
         }
     );
+    info!("Monitoring ({})", config_str);
 
     let mut buffer = [0u8; 1024];
     loop {
         match port.read(&mut buffer).await {
             Ok(n) if n > 0 => {
                 let data = &buffer[..n];
-                print!("[{}] ", port_name);
-                for byte in data {
-                    if byte.is_ascii_graphic() || *byte == b' ' {
-                        print!("{}", *byte as char);
-                    } else if *byte == b'\r' {
-                        print!("\\r");
-                    } else if *byte == b'\n' {
-                        print!("\\n");
-                    } else if *byte == b'\t' {
-                        print!("\\t");
-                    } else {
-                        print!("\\x{:02x}", byte);
-                    }
-                }
-                println!();
+                info!("{}", HexBytes(data));
             }
             Ok(_) => {
                 // No data read, continue
@@ -110,7 +112,7 @@ async fn monitor_port(
                 // Timeout, continue
             }
             Err(e) => {
-                eprintln!("[{}] Error reading: {}", port_name, e);
+                error!("Error reading: {}", e);
                 return Err(e.into());
             }
         }
@@ -119,6 +121,11 @@ async fn monitor_port(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
+
     let args = Args::parse();
 
     // Validate and convert arguments
@@ -128,7 +135,7 @@ async fn main() -> Result<()> {
         7 => DataBits::Seven,
         8 => DataBits::Eight,
         _ => {
-            eprintln!("Invalid data bits: {}. Must be 5, 6, 7, or 8", args.data_bits);
+            error!("Invalid data bits: {}. Must be 5, 6, 7, or 8", args.data_bits);
             std::process::exit(1);
         }
     };
