@@ -23,24 +23,24 @@ impl<'a> std::fmt::Display for HexBytes<'a> {
 #[command(about = "Monitor multiple serial ports and print received data", long_about = None)]
 struct Args {
     /// Serial ports to monitor (e.g., /dev/ttyUSB0 /dev/ttyUSB1)
-    #[arg(required = true)]
+    #[arg(short = 'p', required = true)]
     ports: Vec<String>,
 
     /// Baud rate
-    #[arg(short, long, default_value = "9600")]
+    #[arg(short='b', long, default_value = "9600")]
     baud_rate: u32,
 
     /// Data bits (5, 6, 7, or 8)
-    #[arg(short, long, default_value = "8")]
-    data_bits: u8,
+    #[arg(short='d', long, default_value = "8")]
+    data_bits: DataBitsArg,
 
     /// Parity (none, odd, or even)
-    #[arg(short, long, default_value = "none")]
+    #[arg(short='r', long, default_value = "none")]
     parity: ParityArg,
 
     /// Stop bits (1 or 2)
-    #[arg(short, long, default_value = "1")]
-    stop_bits: u8,
+    #[arg(short='s', long, default_value = "1")]
+    stop_bits: StopBitsArg,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -56,6 +56,46 @@ impl From<ParityArg> for Parity {
             ParityArg::None => Parity::None,
             ParityArg::Odd => Parity::Odd,
             ParityArg::Even => Parity::Even,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum DataBitsArg {
+    #[value(name = "5")]
+    Five,
+    #[value(name = "6")]
+    Six,
+    #[value(name = "7")]
+    Seven,
+    #[value(name = "8")]
+    Eight,
+}
+
+impl From<DataBitsArg> for DataBits {
+    fn from(data_bits: DataBitsArg) -> Self {
+        match data_bits {
+            DataBitsArg::Five => DataBits::Five,
+            DataBitsArg::Six => DataBits::Six,
+            DataBitsArg::Seven => DataBits::Seven,
+            DataBitsArg::Eight => DataBits::Eight,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum StopBitsArg {
+    #[value(name = "1")]
+    One,
+    #[value(name = "2")]
+    Two,
+}
+
+impl From<StopBitsArg> for StopBits {
+    fn from(stop_bits: StopBitsArg) -> Self {
+        match stop_bits {
+            StopBitsArg::One => StopBits::One,
+            StopBitsArg::Two => StopBits::Two,
         }
     }
 }
@@ -128,30 +168,12 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Validate and convert arguments
-    let data_bits = match args.data_bits {
-        5 => DataBits::Five,
-        6 => DataBits::Six,
-        7 => DataBits::Seven,
-        8 => DataBits::Eight,
-        _ => {
-            error!("Invalid data bits: {}. Must be 5, 6, 7, or 8", args.data_bits);
-            std::process::exit(1);
-        }
-    };
-
-    let stop_bits = match args.stop_bits {
-        1 => StopBits::One,
-        2 => StopBits::Two,
-        _ => {
-            eprintln!("Invalid stop bits: {}. Must be 1 or 2", args.stop_bits);
-            std::process::exit(1);
-        }
-    };
-
+    // Convert arguments
+    let data_bits: DataBits = args.data_bits.into();
+    let stop_bits: StopBits = args.stop_bits.into();
     let parity: Parity = args.parity.into();
 
-    println!(
+    info!(
         "Starting serial monitor for {} port(s)...",
         args.ports.len()
     );
@@ -172,7 +194,7 @@ async fn main() -> Result<()> {
     // Wait for all tasks (they run indefinitely unless there's an error)
     for task in tasks {
         if let Err(e) = task.await? {
-            eprintln!("Task error: {}", e);
+            error!("Task error: {}", e);
         }
     }
 
