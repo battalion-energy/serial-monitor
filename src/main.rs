@@ -22,6 +22,7 @@ impl<'a> std::fmt::Display for HexBytes<'a> {
 }
 
 async fn monitor_port(mut port: SerialStream) -> Result<()> {
+    tracing::info!("reading from port");
     let mut buffer = [0u8; 1024];
     loop {
         match port.read(&mut buffer).await {
@@ -57,9 +58,9 @@ async fn main() -> Result<()> {
     // Open all ports sequentially
     let mut unspawned_tasks = Vec::new();
 
-    for port_name in &args.ports {
+    for port_name in args.ports {
         let _span = tracing::info_span!("opening", port = ?port_name).entered();
-        let port = tokio_serial::new(port_name, config.baud_rate)
+        let port = tokio_serial::new(port_name.clone(), config.baud_rate)
             .data_bits(config.data_bits)
             .parity(config.parity)
             .stop_bits(config.stop_bits)
@@ -67,8 +68,12 @@ async fn main() -> Result<()> {
             .context("opening port")?;
 
         tracing::info!("opened port");
-        let task =
-            async { monitor_port(port).await }.instrument(tracing::info_span!("monitor", port=?port_name));
+        let task = async move {
+            let _ = monitor_port(port)
+                .instrument(tracing::info_span!("monitor", port=?port_name))
+                .await;
+        };
+
         unspawned_tasks.push(task);
     }
 
