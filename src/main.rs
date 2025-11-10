@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
             .open_native_async()
             .context("opening port")?;
 
-        tracing::info!("opened port");
+        tracing::info!("opened port: {}", config);
         let task = async move {
             let _ = monitor_port(port)
                 .instrument(tracing::info_span!("monitor", port=?port_name))

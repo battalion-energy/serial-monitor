@@ -106,7 +106,7 @@ impl std::fmt::Display for SerialConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}bps {}/{}/{}",
+            "{} bps {}/{}/{}",
             self.baud_rate,
             match self.data_bits {
                 DataBits::Five => "5",
